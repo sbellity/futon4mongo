@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<!--
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+-->
+<html lang="en">
+  <head>
+    <title>Browse Database</title>
+    <meta http-equiv="Content-Type" content="text/html;charset=utf-8">
+    <link rel="stylesheet" href="style/layout.css?0.9.0" type="text/css">
+    <script src="script/json2.js"></script>
+    <script src="script/jquery.js?1.3.1"></script>
+    <script src="script/jquery.cookies.js?0.9.0"></script>
+    <script src="script/jquery.couch.js?0.9.0"></script>
+    <script src="script/jquery.dialog.js?0.9.0"></script>
+    <script src="script/jquery.resizer.js?0.9.0"></script>
+    <script src="script/jquery.suggest.js?0.9.0"></script>
+    <script src="script/futon.js?0.9.0"></script>
+    <script src="script/futon.browse.js?0.9.0"></script>
+    <script src="script/futon.format.js?0.9.0"></script>
+    <script>
+      var page = new $.futon.CouchDatabasePage();
+      $.futon.navigation.ready(function() {
+        this.addDatabase(page.db.name);
+        this.updateSelection(location.pathname, "?" + page.db.name);
+      });
+
+      $(function() {
+        if (page.redirecting) return;
+        $("h1 strong").text(page.db.name);
+        var viewPath = page.viewName || "_all_docs";
+        if (viewPath != "_temp_view" && viewPath != "_design_docs") {
+          $("h1 a.raw").attr("href", "/" + encodeURIComponent(page.db.name) +
+            "/" + viewPath);
+        }
+
+        $("#viewcode span").click(function() {
+          $("#viewcode").toggleClass("collapsed");
+        });
+        $("#viewcode button.run").click(function() {
+          page.updateDocumentListing();
+        });
+        $("#viewcode button.revert").click(function() {
+          page.revertViewChanges();
+        });
+        $("#viewcode button.save").click(function() {
+          page.saveViewChanges();
+        });
+        $("#viewcode button.saveas").click(function() {
+          page.saveViewAs();
+        });
+        $("#viewcode textarea").makeResizable({
+          always: true,
+          grippie: $("#viewcode .bottom"),
+          vertical: true
+        });
+        $("#viewcode td.map").makeResizable({
+          always: true,
+          grippie: $("#viewcode td.splitter"),
+          horizontal: true
+        });
+
+        // Restore preferences/state from cookies
+        var desc = $.cookies.get(page.db.name + ".desc");
+        if (desc) $("#documents thead th.key").addClass("desc");
+        var rowsPerPage = $.cookies.get(page.db.name + ".perpage");
+        if (rowsPerPage) $("#perpage").val(rowsPerPage);
+
+        page.populateViewsMenu();
+        page.populateViewEditor();
+        if (page.isTempView) {
+          $("#viewcode").show().removeClass("collapsed").find("textarea")[0].focus();
+          $("#documents").hide();
+        }
+
+        $("#switch select").change(function() {
+          var viewName = $(this).val();
+          if (!viewName) $.cookies.remove(page.db.name + ".view");
+          location.href = "?" + encodeURIComponent(page.db.name) +
+            (viewName ? "/" + viewName  : "");
+        });
+        $("#documents thead th.key").click(function() {
+          $(this).toggleClass("desc");
+          page.updateDocumentListing();
+        });
+        $("#perpage").change(function() {
+          page.updateDocumentListing();
+          $.cookies.set(page.db.name + ".perpage", this.value);
+        });
+        $("#toolbar button.add").click(page.newDocument);
+        $("#toolbar button.compact").click(page.compactDatabase);
+        $("#toolbar button.delete").click(page.deleteDatabase);
+
+        $('#jumpto input').addPlaceholder("Document ID").suggest(function(text, callback) {
+          page.db.allDocs({
+            limit: 10, startkey: text, endkey: text + 'zzz',
+            success: function(docs) {
+              var matches = [];
+              for (var i = 0; i < docs.rows.length; i++) {
+                if (docs.rows[i].id.indexOf(text) == 0) {
+                  matches[i] = docs.rows[i].id;
+                }
+              }
+              callback(matches);
+            }
+          });
+        }).keypress(function(e) {
+          if (e.keyCode == 13) {
+            page.jumpToDocument($(this).val());
+          }
+        });
+      });
+    </script>
+  </head>
+
+  <body><div id="wrap">
+    <h1>
+      <a href="index.html">Overview</a>
+      <strong>?</strong>
+      <a class="raw" title="Raw view"></a>
+    </h1>
+    <div id="content">
+      <div id="switch">
+        <label>View: <select autocomplete="false">
+          <option value="_all_docs">All documents</option>
+          <option value="_design_docs">Design documents</option>
+          <option value="_temp_view">Temporary view…</option>
+        </select></label>
+      </div>
+      <div id="jumpto">
+        <label>Jump to:
+          <input type="text" name="docid" autocomplete="off" />
+        </label>
+      </div>
+      <ul id="toolbar">
+        <li><button class="add">New Document</button></li>
+        <li><button class="compact">Compact Database…</button></li>
+        <li><button class="delete">Delete Database…</button></li>
+      </ul>
+
+      <div id="viewcode" class="collapsed" style="display: none">
+        <div class="top">
+          <a id="designdoc-link"></a>
+          <span id="view-toggle">View Code</span>
+        </div>
+        <table summary="View functions" cellspacing="0"><tr>
+          <td class="code map">
+            <label for="viewcode_map">Map Function:</label>
+            <textarea id="viewcode_map" class="map" rows="5" cols="20" spellcheck="false" wrap="off"></textarea>
+          </td>
+          <td class="splitter"></td>
+          <td class="code reduce">
+            <label for="viewcode_reduce">Reduce Function (optional):</label>
+            <textarea id="viewcode_reduce" class="reduce" rows="5" cols="20" spellcheck="false" wrap="off"></textarea>
+          </td>
+        </tr></table>
+        <div class="bottom">
+          <button class="save" type="button" disabled>Save</button>
+          <button class="saveas" type="button">Save As…</button>
+          <button class="revert" type="button" disabled>Revert</button>
+          <button class="run" type="button">Run</button>
+          <label>Language: <select id="language"></select></label>
+        </div>
+      </div>
+      <p id="tempwarn">
+        <strong>Warning</strong>: Please note that temporary views are not
+        suitable for use in production, as they are really slow for any
+        database with more than a few dozen documents. You can use a temporary
+        view to experiment with view functions, but switch to a permanent view
+        before using them in an application.
+      </p>
+
+      <table id="documents" class="listing" cellspacing="0">
+        <caption>Documents</caption>
+        <thead>
+          <tr>
+            <th class="key"><div>Key</div></th>
+            <th class="value">Value</th>
+          </tr>
+        </thead>
+        <tbody class="content">
+        </tbody>
+        <tbody class="footer">
+          <tr>
+            <td colspan="4">
+              <div id="paging">
+                <a class="prev">← Previous Page</a> |
+                <label>Rows per page: <select id="perpage">
+                  <option selected>10</option>
+                  <option>25</option>
+                  <option>50</option>
+                  <option>100</option>
+                </select></label> |
+                <a class="next">Next Page →</a>
+              </div>
+              <span></span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p id="grouptruenotice">
+        <strong>Note</strong>: Views with a reduce function will return a single row of reduced values.
+        If you are looking for the same results that you can see here in Futon,
+        add a <code>?group=true</code> parameter to your view query. Futon does
+        this automatically.
+      </p>
+    </div>
+  </div></body>
+</html>

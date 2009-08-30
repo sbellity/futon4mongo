@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!--
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+-->
+<html lang="en">
+  <head>
+    <title>Configuration</title>
+    <meta http-equiv="Content-Type" content="text/html;charset=utf-8">
+    <link rel="stylesheet" href="style/layout.css?0.9.0" type="text/css">
+    <script src="script/json2.js"></script>
+    <script src="script/jquery.js?1.3.1"></script>
+    <script src="script/jquery.cookies.js?0.9.0"></script>
+    <script src="script/jquery.couch.js?0.9.0"></script>
+    <script src="script/jquery.editinline.js?0.9.0"></script>
+    <script src="script/futon.js?0.9.0"></script>
+    <script>
+      $(function() {
+        $.couch.config({
+          success: function(resp) {
+            var sections = [];
+            for (var sectionName in resp) {
+              sections.push(sectionName);
+            }
+            sections.sort();
+            $.each(sections, function(idx, sectionName) {
+              var row = $("<tr><th></th></tr>")
+                .find("th").text(sectionName).end()
+                .appendTo("#config tbody.content");
+              var section = resp[sectionName]
+              var options = [];
+              for (var option in section) {
+                options.push(option);
+              }
+              options = options.sort();
+              var prev = null;
+              $.each(options, function(idx, optionName) {
+                var cur = idx == 0 ? row : $("<tr></tr>");
+                $("<td class='name'><b></b></td>")
+                  .find("b").text(optionName).end().appendTo(cur);
+                $("<td class='value'><code></code></td>")
+                  .find("code").text(section[optionName]).end().appendTo(cur);
+                cur.data("section", sectionName).data("option", optionName);
+                if (cur !== row) cur.insertAfter(prev);
+                prev = cur;
+              });
+              row.find("th").attr("rowspan", options.length);
+            });
+            $("#config tbody tr").removeClass("odd").filter(":odd").addClass("odd");
+
+            $("#config tbody td.value code").makeEditable({
+              accept: function(newValue) {
+                var row = $(this).parents("tr").eq(0);
+                $.couch.config({
+                  success: function(resp) {
+                    row.find("td.value code").text(newValue);
+                }}, row.data("section"), row.data("option"), newValue);
+              }
+            });
+          }
+        });
+
+      });
+    </script>
+  </head>
+  <body><div id="wrap">
+    <h1>
+      <a href="index.html">Overview</a>
+      <strong>Configuration</strong>
+    </h1>
+    <div id="content">
+      <p class="help">
+        <strong>Note:</strong> Some configuration options may require
+        restarting the server to take effect after modification.
+      </p>
+
+      <table id="config" class="listing" cellspacing="0">
+        <caption>Configuration</caption>
+        <thead><tr>
+          <th>Section</th>
+          <th>Option</th>
+          <th>Value</th>
+        </tr></thead>
+        <tbody class="content"></tbody>
+      </table>
+
+    </div>
+  </div></body>
+</html>

@@ -1,0 +1,170 @@
+#!/usr/bin/env ruby 
+
+require "rubygems"
+require "sinatra"
+require "net/http"
+require "yajl"
+require 'yajl/json_gem'
+require "pp"
+require "mongo"
+
+set :public, File.dirname(__FILE__)
+
+MONGO_HOST = "127.0.0.1"
+MONGO_PORT = 27017
+MONGO_WEB_PORT = 28017
+
+get "/q/:db/:collection" do
+  content_type "application/json"
+  proxy MONGO_HOST, MONGO_WEB_PORT, params
+end
+
+get "/" do
+  respond({
+    "couchdb" => "Welcome",
+    "version" => "mongodb-1.0"
+  })
+end
+
+get "/_config/*" do
+  if params["splat"][0] == "query_servers/"
+    '{"javascript":"/usr/local/bin/couchjs /usr/local/share/couchdb/server/main.js"}'
+  end
+end
+
+get "/_all_dbs" do
+  all_dbs = conn.database_names.map do |db_name| 
+    conn.db(db_name).collection_names.map do |col_name| 
+      [db_name, col_name].join("/") unless col_name.split(".")[0] == "system"
+    end
+  end.flatten.compact
+  respond all_dbs
+end
+
+get "/_:command/*" do
+end
+
+
+
+get "/:database/:collection/" do
+  collection = conn.db(params["database"]).collection(params["collection"])
+  respond({
+    "db_name" => [params["database"], params["collection"]].join("/"),
+    "doc_count" => collection.count,
+    "disk_size" => 123
+  })
+end
+
+get "/:database/:collection/_all_docs" do
+  col = conn.db(params["database"]).collection(params["collection"])
+  options = {}
+  options[:limit] = params["limit"].nil? ? 10 : params["limit"].to_i
+  options[:sort] = { "_id" => (params["descending"] == "true" ? -1 : 1) }
+  
+  query = {}
+  
+  if (params["startkey"] || params["endkey"])
+    query["_id"] ||= {}
+    query["_id"]["$gte"] = params["startkey"].gsub('"', "") if params["startkey"]
+    query["_id"]["$lte"] = params["endkey"].gsub('"', "") if params["endkey"]
+  end
+  
+  
+  puts "\n\n\n==============  QUERY HERE ====================="
+  pp query
+  
+  res = col.find(query, options)
+  rows = res.to_a.map do |doc|
+    
+    doc["_id"] = doc["_id"].to_s
+    
+    d = { 
+      "id" => doc["_id"],
+      "key" => doc["_id"],
+      "value" => doc.keys
+    }
+    d["doc"] = doc if params["include_docs"] == "true" 
+    
+    d
+  end
+  
+  respond({
+    "total_rows" => res.count,
+    "offset" => params["offset"] || 0,
+    "rows" => rows
+   })
+end
+
+get "/:database/:collection/_design/:design_doc/_view/:view_name" do 
+  col = conn.db(params["database"]).collection(params["collection"])
+  design_doc = col.find_one({ "_id" => "_design/#{params["design_doc"]}" }, :limit => 1)
+  if design_doc && design_doc["views"]
+    if design_doc["views"][params["view_name"]]
+      map = design_doc["views"][params["view_name"]]["map"]
+    end
+  end
+  
+  opts = {}
+  opts[:limit] = params["limit"].nil? ? 11 : params["limit"].to_i
+  
+  res = col.find(map, opts)
+  
+  rows = res.to_a.map do |doc|
+    
+    doc["_id"] = doc["_id"].to_s
+    
+    d = { 
+      "id" => doc["_id"],
+      "key" => doc["_id"],
+      "value" => doc.keys
+    }
+    d
+  end
+  
+  
+  respond({
+    "total_rows" => res.count,
+    "offset" => params["offset"] || 0,
+    "rows" => rows
+   })
+  
+end
+
+
+
+get "/:database/:collection/*" do
+  id = params["splat"].join("/")
+  col = conn.db(params["database"]).collection(params["collection"])
+  doc = col.find_one({ "_id" => id }, :limit => 1) || col.find_one({ "_id" => Mongo::ObjectID.from_string(id) }, :limit => 1)
+  doc["_id"] = doc["_id"].to_s
+  respond(doc)
+end
+
+put "/:database/:collection/:id" do
+  col = conn.db(params["database"]).collection(params["collection"])
+end
+
+
+
+private
+
+def conn
+  @conn ||= Mongo::Connection.new(MONGO_HOST, MONGO_PORT)
+end
+
+def respond(data)
+  content_type "application/json"
+  data.is_a?(String) ? data : data.to_json
+end
+
+def proxy host, port, params
+  get_params = params
+  db = get_params.delete("db")
+  collection = get_params.delete("collection")
+  
+  get_params["limit"] = get_params["limit"].nil? ? -10 : get_params["limit"].to_i.abs * -1
+  url = "/#{db}/#{collection}/?#{(get_params.map { |k, v|  "#{k}=#{v}" }).join("&")}"
+  http = Net::HTTP.new(host, port)
+  response, data = http.get(url) rescue ["", ""]
+  data
+end
