@@ -146,20 +146,86 @@ end
 
 
 get "/:database/:collection/*" do
+  col = conn.db(params["database"]).collection(params["collection"])  
+  id = params["splat"].join("/")
+  doc = find_doc(col, id)
+  
+  if doc.nil?
+    error_not_found
+  else
+    doc["_id"] = doc["_id"].to_s
+    respond(doc)
+  end
+end
+
+put "/:database/:collection/*" do
   id = params["splat"].join("/")
   col = conn.db(params["database"]).collection(params["collection"])
-  doc = col.find_one({ "_id" => id }, :limit => 1) || col.find_one({ "_id" => Mongo::ObjectID.from_string(id) }, :limit => 1)
-  doc["_id"] = doc["_id"].to_s
-  respond(doc)
+  doc = Yajl::Parser.new.parse(request.body)
+  doc.delete("_id")
+  
+  original_doc = find_doc(col, id)
+  
+  puts "\n\n\n\n\n\n\n====== Found original doc... #{original_doc["_id"].class} : #{original_doc["_id"]}"
+  pp original_doc
+  
+  id = original_doc["_id"] rescue nil
+
+  if id.nil?
+    error_not_found
+  else
+    res = col.update({ "_id" => id }, { "$set" => doc }, :upsert => true)
+    
+    puts "\n\n\n========== Saving doc #{id.class} : #{id}"
+    pp doc
+    
+    content_type "application/json"
+    headers "Connection" => "close"
+    status 201
+    {"ok" => true, "id" => id.to_s, "rev" => "123"}.to_json
+  end
 end
 
-put "/:database/:collection/:id" do
+delete "/:database/:collection/*" do
+  id = params["splat"].join("/")
   col = conn.db(params["database"]).collection(params["collection"])
+  
+  original_doc = find_doc(col, id)
+  id = original_doc["_id"] rescue nil
+
+  if id.nil?
+    error_not_found
+  else
+    col.remove({ "_id" => id })
+    content_type "application/json"
+    headers "Connection" => "close"
+    status 200
+    {"ok" => true, "rev" => "123"}.to_json
+  end
+  
+  
 end
-
-
 
 private
+
+def error_not_found
+  status 404
+  '{"error":"not_found","reason":"missing"}'
+end
+
+def find_doc(col, id)
+  doc = col.find_one({ "_id" => id.to_s })
+  doc ||= col.find_one({ "_id" => id.to_i })
+  if doc.nil?
+    begin
+      id = Mongo::ObjectID.from_string(id.to_s)
+      doc = col.find_one({ "_id" => id })
+    rescue
+      nil
+    end
+  end
+  doc
+end
 
 def conn
   @conn ||= Mongo::Connection.new(MONGO_HOST, MONGO_PORT)
