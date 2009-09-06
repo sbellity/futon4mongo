@@ -18,6 +18,9 @@ require "yajl"
 require 'yajl/json_gem'
 require "pp"
 require "mongo"
+require "uri"
+require "cgi"
+
 
 module Mongo
   class ObjectID
@@ -34,7 +37,7 @@ before do
 end
 
 get "/" do
-  { "couchdb" => "Welcome", "version" => "mongodb-1.0" }.to_json
+  { "mongodb" => "Welcome", "version" => "mongodb-1.0" }.to_json
 end
 
 get "/_config/*" do
@@ -44,10 +47,36 @@ get "/_config/*" do
   end
 end
 
+# DB operations
+
 get "/_all_dbs" do
   all_dbs.map { |n,c| c.map { |cn| [n,cn].join("/") } }.flatten.compact.to_json
 end
 
+get "/_uuids" do 
+  referrer = URI.parse(request.env["HTTP_REFERER"])
+  db_name, col_name = CGI::unescape(referrer.query).split("/", 2)
+
+  if (db_name && col_name)
+    { "uuids" => [col(col_name, db_name).insert({}).to_s] }.to_json
+  end
+end
+
+get "/_active_tasks" do
+  [].to_json
+end
+
+put "/:database/:collection/" do
+  db.create_collection(params[:collection])
+  status 201
+  { "ok" => "true" }.to_json
+end
+
+delete "/:database/:collection/" do
+  db.drop_collection(params[:collection])
+  status 200
+  { "ok" => "true" }.to_json
+end
 
 get "/:database/:collection/" do
   {
@@ -61,18 +90,56 @@ get "/:database/:collection/_all_docs" do
   options = {}
   options[:limit] = params["limit"].nil? ? 10 : params["limit"].to_i
   options[:sort] = { "_id" => (params["descending"] == "true" ? -1 : 1) }
+  options[:offset] = params["skip"].to_i unless params["skip"].nil?
   
   query = {}
+  query_obj = {}
   
-  if (params["startkey"] || params["endkey"])
+  if (params["startkey_docid"])
+    begin
+      query_obj["_id"] = { "$gte" => Mongo::ObjectID.from_string(params["startkey_docid"]) }
+    rescue
+      
+      if params["startkey_docid"] =~ /^[0-9]+$/
+        s = params["startkey_docid"].to_i 
+      end
+      
+      query["_id"] = { "$gte" => s }
+    end
+  
+  elsif (params["startkey"] || params["endkey"])
+    s = params["startkey"].gsub('"', "") if params["startkey"]
+    e = params["endkey"].gsub('"', "") if params["endkey"]
+    
+    if params["startkey"] && params["endkey"] && params["limit"] == "10" && params["endkey"].gsub('"', "")[-1] == 122
+      start_key = Mongo::ObjectID.from_string(s.ljust(24, "0")) rescue s
+      end_key = Mongo::ObjectID.from_string(e.gsub("z", "f").ljust(24, "f")) rescue e
+      query_obj["_id"] ||= {}
+      query_obj["_id"]["$gte"] = start_key if start_key
+      query_obj["_id"]["$lte"] = end_key if end_key
+    end
+    
+    s = s.to_i if s =~ /^[0-9]+$/
+    e = e.to_i if e =~ /^[0-9]+$/
+    
     query["_id"] ||= {}
-    query["_id"]["$gte"] = params["startkey"].gsub('"', "") if params["startkey"]
-    query["_id"]["$lte"] = params["endkey"].gsub('"', "") if params["endkey"]
+    query["_id"]["$gte"] = s if s
+    query["_id"]["$lte"] = e if e
   end
     
-  res = col.find(query, options)
+    
+    
+  if query_obj["_id"]
+    res = col.find(query_obj, options)
+  end
   
-  rows = res.to_a.map do |doc|
+  if res.nil? || res.count == 0
+    res = col.find(query, options) 
+  end
+  
+  results =  res.to_a
+
+  rows = results.map do |doc|
     doc["_id"] = doc["_id"].to_s
     d = { "id" => doc["_id"], "key" => doc["_id"], "value" => doc.keys }
     d["doc"] = doc if params["include_docs"] == "true"
@@ -193,8 +260,10 @@ def docs f
   
 end
 
-def all_dbs
-  conn.database_names.inject({}) { |dbs, d| dbs.merge({ d => conn.db(d).collection_names }) }
+def all_dbs include_system=false
+  conn.database_names.inject({}) do |dbs, d|
+    dbs.merge({ d => conn.db(d).collection_names.map { |c| c unless (c.split(".")[0] == "system" && !include_system) }.compact })
+  end
 end
 
 def find_doc(col, id)
