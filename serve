@@ -11,8 +11,6 @@
 # CONDITIONS OF ANY KIND, either express or implied. See the License for the
 # specific language governing permissions and limitations under the License.
 
-
-
 require "rubygems"
 require "sinatra"
 require "net/http"
@@ -21,55 +19,45 @@ require 'yajl/json_gem'
 require "pp"
 require "mongo"
 
+module Mongo
+  class ObjectID
+    def to_json
+      return self.to_s
+    end
+  end
+end
+
 set :public, File.dirname(__FILE__)
 
-MONGO_HOST = "127.0.0.1"
-MONGO_PORT = 27017
-MONGO_WEB_PORT = 28017
-
-get "/q/:db/:collection" do
+before do
   content_type "application/json"
-  proxy MONGO_HOST, MONGO_WEB_PORT, params
 end
 
 get "/" do
-  respond({
-    "couchdb" => "Welcome",
-    "version" => "mongodb-1.0"
-  })
+  { "couchdb" => "Welcome", "version" => "mongodb-1.0" }.to_json
 end
 
 get "/_config/*" do
   if params["splat"][0] == "query_servers/"
+    # Dummy response for futon...
     '{"javascript":"/usr/local/bin/couchjs /usr/local/share/couchdb/server/main.js"}'
   end
 end
 
 get "/_all_dbs" do
-  all_dbs = conn.database_names.map do |db_name| 
-    conn.db(db_name).collection_names.map do |col_name| 
-      [db_name, col_name].join("/") unless col_name.split(".")[0] == "system"
-    end
-  end.flatten.compact
-  respond all_dbs
+  all_dbs.map { |n,c| c.map { |cn| [n,cn].join("/") } }.flatten.compact.to_json
 end
-
-get "/_:command/*" do
-end
-
 
 
 get "/:database/:collection/" do
-  collection = conn.db(params["database"]).collection(params["collection"])
-  respond({
+  {
     "db_name" => [params["database"], params["collection"]].join("/"),
-    "doc_count" => collection.count,
+    "doc_count" => col.count,
     "disk_size" => 123
-  })
+  }.to_json
 end
 
 get "/:database/:collection/_all_docs" do
-  col = conn.db(params["database"]).collection(params["collection"])
   options = {}
   options[:limit] = params["limit"].nil? ? 10 : params["limit"].to_i
   options[:sort] = { "_id" => (params["descending"] == "true" ? -1 : 1) }
@@ -81,31 +69,22 @@ get "/:database/:collection/_all_docs" do
     query["_id"]["$gte"] = params["startkey"].gsub('"', "") if params["startkey"]
     query["_id"]["$lte"] = params["endkey"].gsub('"', "") if params["endkey"]
   end
-  
-  
-  puts "\n\n\n==============  QUERY HERE ====================="
-  pp query
-  
+    
   res = col.find(query, options)
+  
   rows = res.to_a.map do |doc|
-    
     doc["_id"] = doc["_id"].to_s
-    
-    d = { 
-      "id" => doc["_id"],
-      "key" => doc["_id"],
-      "value" => doc.keys
-    }
-    d["doc"] = doc if params["include_docs"] == "true" 
-    
+    d = { "id" => doc["_id"], "key" => doc["_id"], "value" => doc.keys }
+    d["doc"] = doc if params["include_docs"] == "true"
     d
   end
   
-  respond({
+  {
     "total_rows" => res.count,
     "offset" => params["offset"] || 0,
     "rows" => rows
-   })
+   }.to_json
+   
 end
 
 get "/:database/:collection/_design/:design_doc/_view/:view_name" do 
@@ -123,23 +102,20 @@ get "/:database/:collection/_design/:design_doc/_view/:view_name" do
   res = col.find(map, opts)
   
   rows = res.to_a.map do |doc|
-    
     doc["_id"] = doc["_id"].to_s
     
-    d = { 
+    { 
       "id" => doc["_id"],
       "key" => doc["_id"],
       "value" => doc.keys
     }
-    d
   end
   
-  
-  respond({
+  {
     "total_rows" => res.count,
     "offset" => params["offset"] || 0,
     "rows" => rows
-   })
+   }.to_json
   
 end
 
@@ -154,7 +130,7 @@ get "/:database/:collection/*" do
     error_not_found
   else
     doc["_id"] = doc["_id"].to_s
-    respond(doc)
+    doc.to_json
   end
 end
 
@@ -165,19 +141,13 @@ put "/:database/:collection/*" do
   doc.delete("_id")
   
   original_doc = find_doc(col, id)
-  
-  puts "\n\n\n\n\n\n\n====== Found original doc... #{original_doc["_id"].class} : #{original_doc["_id"]}"
-  pp original_doc
-  
   id = original_doc["_id"] rescue nil
 
   if id.nil?
     error_not_found
   else
-    res = col.update({ "_id" => id }, { "$set" => doc }, :upsert => true)
-    
-    puts "\n\n\n========== Saving doc #{id.class} : #{id}"
-    pp doc
+    doc["_id"] = id
+    res = col.update({ "_id" => id }, doc)
     
     content_type "application/json"
     headers "Connection" => "close"
@@ -202,8 +172,6 @@ delete "/:database/:collection/*" do
     status 200
     {"ok" => true, "rev" => "123"}.to_json
   end
-  
-  
 end
 
 private
@@ -213,37 +181,35 @@ def error_not_found
   '{"error":"not_found","reason":"missing"}'
 end
 
+def db d=nil 
+  conn.db(d || params[:database])
+end
+
+def col c=nil, d=nil
+  db(d).collection(c || params[:collection])
+end
+
+def docs f
+  
+end
+
+def all_dbs
+  conn.database_names.inject({}) { |dbs, d| dbs.merge({ d => conn.db(d).collection_names }) }
+end
+
 def find_doc(col, id)
-  doc = col.find_one({ "_id" => id.to_s })
-  doc ||= col.find_one({ "_id" => id.to_i })
-  if doc.nil?
-    begin
-      id = Mongo::ObjectID.from_string(id.to_s)
-      doc = col.find_one({ "_id" => id })
-    rescue
-      nil
-    end
+  ids = [id.to_s, id.to_i]
+  begin
+    ids << Mongo::ObjectID.from_string(id.to_s)
+  rescue
+    nil
   end
-  doc
+  col.find_one({ "_id" => { "$in" => ids } })
 end
 
 def conn
-  @conn ||= Mongo::Connection.new(MONGO_HOST, MONGO_PORT)
+  host = ARGV[0] || "127.0.0.1"
+  port = ARGV[1] || 27017
+  @conn ||= Mongo::Connection.new(host, port)
 end
 
-def respond(data)
-  content_type "application/json"
-  data.is_a?(String) ? data : data.to_json
-end
-
-def proxy host, port, params
-  get_params = params
-  db = get_params.delete("db")
-  collection = get_params.delete("collection")
-  
-  get_params["limit"] = get_params["limit"].nil? ? -10 : get_params["limit"].to_i.abs * -1
-  url = "/#{db}/#{collection}/?#{(get_params.map { |k, v|  "#{k}=#{v}" }).join("&")}"
-  http = Net::HTTP.new(host, port)
-  response, data = http.get(url) rescue ["", ""]
-  data
-end
