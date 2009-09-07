@@ -21,15 +21,6 @@ require "mongo"
 require "uri"
 require "cgi"
 
-
-module Mongo
-  class ObjectID
-    def to_json
-      return self.to_s
-    end
-  end
-end
-
 set :public, File.dirname(__FILE__)
 
 before do
@@ -41,7 +32,7 @@ get "/" do
 end
 
 get "/_config/*" do
-  if params["splat"][0] == "query_servers/"
+  if params[:splat][0] == "query_servers/"
     # Dummy response for futon...
     '{"javascript":"/usr/local/bin/couchjs /usr/local/share/couchdb/server/main.js"}'
   end
@@ -59,6 +50,8 @@ get "/_uuids" do
 
   if (db_name && col_name)
     { "uuids" => [col(col_name, db_name).insert({}).to_s] }.to_json
+  else 
+    error_not_found
   end
 end
 
@@ -68,131 +61,99 @@ end
 
 put "/:database/:collection/" do
   db.create_collection(params[:collection])
-  status 201
-  { "ok" => "true" }.to_json
+  ok 201
 end
 
 delete "/:database/:collection/" do
-  db.drop_collection(params[:collection])
-  status 200
-  { "ok" => "true" }.to_json
+  db.drop_collection(col.name)
+  ok
 end
 
 get "/:database/:collection/" do
   {
-    "db_name" => [params["database"], params["collection"]].join("/"),
+    "db_name" => [db.name, col.name].join("/"),
     "doc_count" => col.count,
     "disk_size" => 123
   }.to_json
 end
 
+post "/:database/:collection/_compact" do
+  ok 202
+end
+
 get "/:database/:collection/_all_docs" do
-  options = {}
-  options[:limit] = params["limit"].nil? ? 10 : params["limit"].to_i
-  options[:sort] = { "_id" => (params["descending"] == "true" ? -1 : 1) }
-  options[:offset] = params["skip"].to_i unless params["skip"].nil?
   
   query = {}
-  query_obj = {}
   
-  if (params["startkey_docid"])
-    begin
-      query_obj["_id"] = { "$gte" => Mongo::ObjectID.from_string(params["startkey_docid"]) }
-    rescue
-      
-      if params["startkey_docid"] =~ /^[0-9]+$/
-        s = params["startkey_docid"].to_i 
-      end
-      
-      query["_id"] = { "$gte" => s }
+  collection = col
+  
+  
+  # results for pagination
+  if startkey_docid
+    puts "Getting _all_docs with startkey_docid : (class: #{startkey_docid.class})"
+    query["_id"] = { "$gte" => startkey_docid }
+  
+  # Design documents are they are stored in the special (hidden) collection '__design'
+  elsif startkey =~ /^_design.*/ && endkey =~ /^_design.*/
+    collection = design_col
+    query["collection"] = col.name
+  
+  elsif (!startkey.nil? || !endkey.nil?)
+        
+    # for docid direct access...
+    if startkey && endkey && params[:limit] == "10" && endkey[-1] == 122
+      s = Mongo::ObjectID.from_string(startkey.ljust(24, "0")) rescue startkey
+      e = Mongo::ObjectID.from_string(endkey.gsub("z", "f").ljust(24, "f")) rescue endkey
+      query["_id"] = {
+        "$gte" => s,
+        "$lte" => e
+      }
+    else
+      query["_id"] = {}
+      query["_id"]["$gte"] = startkey if startkey
+      query["_id"]["$lte"] = endkey if endkey
     end
-  
-  elsif (params["startkey"] || params["endkey"])
-    s = params["startkey"].gsub('"', "") if params["startkey"]
-    e = params["endkey"].gsub('"', "") if params["endkey"]
-    
-    if params["startkey"] && params["endkey"] && params["limit"] == "10" && params["endkey"].gsub('"', "")[-1] == 122
-      start_key = Mongo::ObjectID.from_string(s.ljust(24, "0")) rescue s
-      end_key = Mongo::ObjectID.from_string(e.gsub("z", "f").ljust(24, "f")) rescue e
-      query_obj["_id"] ||= {}
-      query_obj["_id"]["$gte"] = start_key if start_key
-      query_obj["_id"]["$lte"] = end_key if end_key
-    end
-    
-    s = s.to_i if s =~ /^[0-9]+$/
-    e = e.to_i if e =~ /^[0-9]+$/
-    
-    query["_id"] ||= {}
-    query["_id"]["$gte"] = s if s
-    query["_id"]["$lte"] = e if e
-  end
-    
-    
-    
-  if query_obj["_id"]
-    res = col.find(query_obj, options)
   end
   
-  if res.nil? || res.count == 0
-    res = col.find(query, options) 
-  end
-  
-  results =  res.to_a
-
-  rows = results.map do |doc|
-    doc["_id"] = doc["_id"].to_s
-    d = { "id" => doc["_id"], "key" => doc["_id"], "value" => doc.keys }
-    d["doc"] = doc if params["include_docs"] == "true"
-    d
-  end
-  
-  {
-    "total_rows" => res.count,
-    "offset" => params["offset"] || 0,
-    "rows" => rows
-   }.to_json
-   
+  docs_list collection.find(query, query_options)
 end
 
-get "/:database/:collection/_design/:design_doc/_view/:view_name" do 
-  col = conn.db(params["database"]).collection(params["collection"])
-  design_doc = col.find_one({ "_id" => "_design/#{params["design_doc"]}" }, :limit => 1)
-  if design_doc && design_doc["views"]
-    if design_doc["views"][params["view_name"]]
-      map = design_doc["views"][params["view_name"]]["map"]
-    end
-  end
-  
-  opts = {}
-  opts[:limit] = params["limit"].nil? ? 11 : params["limit"].to_i
-  
-  res = col.find(map, opts)
-  
-  rows = res.to_a.map do |doc|
-    doc["_id"] = doc["_id"].to_s
-    
-    { 
-      "id" => doc["_id"],
-      "key" => doc["_id"],
-      "value" => doc.keys
-    }
-  end
-  
-  {
-    "total_rows" => res.count,
-    "offset" => params["offset"] || 0,
-    "rows" => rows
-   }.to_json
-  
+get "/:database/:collection/_design/:design_doc" do
+  doc = design_col.find_one({ "_id" => "_design/#{params[:design_doc]}", "collection" => col.name })
+  doc.to_json
 end
 
+delete "/:database/:collection/_design/:design_doc" do
+  puts "Deleting design_doc... #{params[:design_doc]}"
+  design_col.remove({"_id" => "_design/#{params[:design_doc]}", "collection" => col.name })
+  ok
+end
+
+put "/:database/:collection/_design/:design_doc" do
+  doc = Yajl::Parser.new.parse(request.body)
+  doc["collection"] = col.name
+  
+  puts "\n\n\n\n--- Saving design doc _design/#{params[:design_doc]}"
+  pp doc
+  
+  design_col.update({ "_id" => "_design/#{params[:design_doc]}" }, doc, :upsert => true)
+  ok 201, { "id" => "_design/#{params[:design_doc]}", "rev" => "1-abc" }
+end
+
+post "/:database/:collection/_temp_view" do
+  query_view Yajl::Parser.new.parse(request.body.read)
+end
+
+get "/:database/:collection/_design/:design_doc/_view/:view_name" do
+  design_doc = design_col.find_one({ "_id" => "_design/#{params[:design_doc]}" })
+  view = design_doc["views"][params[:view_name]] rescue nil
+  
+  query_view view
+end
 
 
 get "/:database/:collection/*" do
-  col = conn.db(params["database"]).collection(params["collection"])  
-  id = params["splat"].join("/")
-  doc = find_doc(col, id)
-  
+  doc = find_doc(params[:splat].join("/"))
   if doc.nil?
     error_not_found
   else
@@ -202,78 +163,60 @@ get "/:database/:collection/*" do
 end
 
 put "/:database/:collection/*" do
-  id = params["splat"].join("/")
-  col = conn.db(params["database"]).collection(params["collection"])
+  id = params[:splat].join("/")
   doc = Yajl::Parser.new.parse(request.body)
-  doc.delete("_id")
+    
+  doc_found = find_doc({ "_id" => id }).nil?
   
-  original_doc = find_doc(col, id)
-  id = original_doc["_id"] rescue nil
-
-  if id.nil?
-    error_not_found
+  if doc_found.nil?
+    id = col.insert(doc)
   else
+    id = doc_found["_id"]
     doc["_id"] = id
     res = col.update({ "_id" => id }, doc)
-    
-    content_type "application/json"
-    headers "Connection" => "close"
-    status 201
-    {"ok" => true, "id" => id.to_s, "rev" => "123"}.to_json
   end
+  
+  ok 201, { "id" => id.to_s, "rev" => "1" }
 end
 
 delete "/:database/:collection/*" do
-  id = params["splat"].join("/")
-  col = conn.db(params["database"]).collection(params["collection"])
-  
-  original_doc = find_doc(col, id)
-  id = original_doc["_id"] rescue nil
-
-  if id.nil?
+  doc = find_doc params[:splat].join("/")
+  if doc.nil?
     error_not_found
   else
-    col.remove({ "_id" => id })
-    content_type "application/json"
-    headers "Connection" => "close"
-    status 200
-    {"ok" => true, "rev" => "123"}.to_json
+    col.remove({ "_id" => doc["_id"] })
+    ok
   end
 end
 
 private
 
-def error_not_found
-  status 404
-  '{"error":"not_found","reason":"missing"}'
+def ok st=200, options={}
+  status st
+  { "ok" => "true" }.merge(options).to_json
 end
 
-def db d=nil 
-  conn.db(d || params[:database])
+def error_not_found
+  status 404
+  { "error" => "not_found", "reason" => "missing" }.to_json
+end
+
+def db d=nil
+  conn.db(d || params[:database]) rescue nil
 end
 
 def col c=nil, d=nil
-  db(d).collection(c || params[:collection])
+  db(d).collection(c || params[:collection]) rescue nil
 end
 
-def docs f
-  
+def design_col d=nil
+  db(d).collection("__design")
 end
 
 def all_dbs include_system=false
   conn.database_names.inject({}) do |dbs, d|
-    dbs.merge({ d => conn.db(d).collection_names.map { |c| c unless (c.split(".")[0] == "system" && !include_system) }.compact })
+    dbs.merge({ d => conn.db(d).collection_names.map { |c| c unless ((c.split(".")[0] == "system" && !include_system) || c == "__design") }.compact })
   end
-end
-
-def find_doc(col, id)
-  ids = [id.to_s, id.to_i]
-  begin
-    ids << Mongo::ObjectID.from_string(id.to_s)
-  rescue
-    nil
-  end
-  col.find_one({ "_id" => { "$in" => ids } })
 end
 
 def conn
@@ -282,3 +225,92 @@ def conn
   @conn ||= Mongo::Connection.new(host, port)
 end
 
+def startkey
+  @startkey ||= getkey(params[:startkey])
+end
+
+def endkey
+  @endkey ||= getkey(params[:endkey])
+end
+
+def startkey_docid
+  @startkey_docid ||= getkey(params[:startkey_docid])
+end
+
+def getkey(key)
+  puts "GetKey : #{key}"
+  return nil if key.nil?
+  key.gsub!('"', '')
+  if key =~ /^[0-9]+$/
+    return key.to_i
+  else
+    return Mongo::ObjectID.from_string(key) rescue key
+  end
+end
+
+def find_doc(id, collection=nil)
+  (collection || col).find_one({ "_id" => getkey(id) }) || (collection || col).find_one({ "_id" => id.to_s })
+end
+
+def query_options
+  options = {}
+  options[:limit] = params[:limit].nil? ? 10 : params[:limit].to_i
+  options[:sort] = { "_id" => (params[:descending] == "true" ? -1 : 1) }
+  options[:offset] = params[:skip].nil? ? 0 : params[:skip].to_i
+  return options
+end
+
+def docs_list res, include_docs=false, include_docs_in_value=false
+  results = res.to_a
+  include_docs ||= ( params[:include_docs] == "true" )
+  
+  rows = results.map do |doc|
+    d = { "id" => doc["_id"].to_s, "key" => doc["_id"].to_s }
+    d["value"] = include_docs_in_value ? doc : doc.keys
+    d["doc"] = doc if include_docs
+    d
+  end
+  
+  {
+    "total_rows" => res.count,
+    "offset" => query_options[:offset],
+    "rows" => rows
+   }.to_json
+end
+
+def query_view view_doc={}
+  
+  view_doc = Yajl::Parser.new.parse(view_doc) if view_doc.is_a? String
+  
+  puts "\n\n\n\ View doc"
+  pp view_doc
+  
+  if view_doc["map"].nil?
+    filter = view_doc
+    options = {}
+  else
+    filter = Yajl::Parser.new.parse(view_doc["map"]) rescue {}
+    options = Yajl::Parser.new.parse(view_doc["reduce"]) rescue {}
+    reduce = options.delete("reduce")
+    fields = options.delete("fields")
+    keys = options.delete("keys")
+    initial = options.delete("initial")
+  end
+
+  puts "\n\n\nFilter #{filter.class}: "
+  pp filter
+  puts "\n\n\nOptions #{options.class}: "
+  pp options
+
+  
+  if params["group"] == "true" && reduce
+    res = col.group(keys, filter, initial, reduce)
+  else
+    opts = query_options.merge({
+      :fields => fields
+    })
+    res = col.find(filter, opts)
+  end
+
+  docs_list res, false, true
+end
