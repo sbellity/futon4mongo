@@ -163,15 +163,14 @@ get "/:database/:collection/*" do
 end
 
 put "/:database/:collection/*" do
-  id = params[:splat].join("/")
   doc = Yajl::Parser.new.parse(request.body)
-    
-  doc_found = find_doc({ "_id" => id }).nil?
   
-  if doc_found.nil?
+  original_doc = find_doc(params[:splat].join("/"))
+  
+  if original_doc.nil?
     id = col.insert(doc)
   else
-    id = doc_found["_id"]
+    id = original_doc["_id"]
     doc["_id"] = id
     res = col.update({ "_id" => id }, doc)
   end
