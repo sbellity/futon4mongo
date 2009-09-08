@@ -36,9 +36,9 @@ Go to http://localhost:4567/_utils/index.html
 
 futon4mongo replicates CouchDB's views functionality with some notable differences :
 
-    - views are stored in design documents in a special collection called "__design"
-    - MongoDB does not support (yet?) map/reduce operations, so the "map" part of the view is used to store filters as json documents. 
-    - The "reduce" part is used to store other parameters (TODO : complete documentation here...)
+    * views are stored in design documents in a special collection called "__design"
+    * MongoDB does not support (yet?) map/reduce operations, so the "map" part of the view is used to store filters as json documents. 
+    * The "reduce" part is used to store other parameters (TODO : complete documentation here...)
 
 
 = Issues & Compatibility
@@ -48,16 +48,15 @@ futon4mongo replicates CouchDB's views functionality with some notable differenc
 CouchDB does not have "collections", all the documents are stored directly into "databases". 
 futon4mongo sees mongo's collections as databases with the following conventions : 
 
-    - futon'db = "db_name/collection_name"
-
-    - futon's db list does not include mongo's system collections nor the special "__design" collections
+    * futon'db = "db_name/collection_name"
+    * futon's db list does not include mongo's system collections nor the special "__design" collections
 
 === Document IDs
 
 Mongo's _id are typed... and it make it difficult use CouchDB's REST interface as is with Mongo. The following conventions are used to try to guess the correct _id type from the string provided in the url.
 
-    - if _id is made of numbers, tries to cast _id as a FixNum and falls back to a String if no result is found
-    - if _id is a valid ObjectId tries to cast _id as a Mongo::ObjectID and falls back to a String if no result is found
-    - else _id is considered as a String
+    * if _id is made of numbers, tries to cast _id as a FixNum and falls back to a String if no result is found
+    * if _id is a valid ObjectId tries to cast _id as a Mongo::ObjectID and falls back to a String if no result is found
+    * else _id is considered as a String
 
 This method is not 100% reliable, but I guess it should cover the most common situations
