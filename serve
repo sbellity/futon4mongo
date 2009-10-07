@@ -49,7 +49,7 @@ get "/_uuids" do
   db_name, col_name = CGI::unescape(referrer.query).split("/", 2)
 
   if (db_name && col_name)
-    { "uuids" => [col(col_name, db_name).insert({}).to_s] }.to_json
+    { "uuids" => [Mongo::ObjectID.new.to_s] }.to_json
   else 
     error_not_found
   end
