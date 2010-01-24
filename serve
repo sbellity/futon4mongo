@@ -254,8 +254,8 @@ end
 def query_options
   options = {}
   options[:limit] = params[:limit].nil? ? 10 : params[:limit].to_i
-  options[:sort] = { "_id" => (params[:descending] == "true" ? -1 : 1) }
-  options[:offset] = params[:skip].nil? ? 0 : params[:skip].to_i
+  options[:sort] = [["_id", (params[:descending] == "true" ? 'descending' : 'ascending')]]
+  options[:skip] = params[:skip].nil? ? 0 : params[:skip].to_i
   return options
 end
 
@@ -272,7 +272,7 @@ def docs_list res, include_docs=false, include_docs_in_value=false
   
   {
     "total_rows" => res.count,
-    "offset" => query_options[:offset],
+    "offset" => query_options[:skip],
     "rows" => rows
    }.to_json
 end
