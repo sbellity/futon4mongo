@@ -2,7 +2,7 @@
 
 This application is experimental for the moment do not use it on a production server !
 
-futon4mongo is a small Sinatra app that partially replicates CouchDB's REST interface on top of MongoDB... 
+futon4mongo is a small Sinatra app that partially replicates CouchDB's REST interface on top of MongoDB...
 Making CouchDB's Futon web interface compatible with our beloved MongoDB (yeah !).
 
 Futon's code is included but has not been modified (ok... I just changed the logo). This project is an experimentation to bring a fully featured web based frontend to MongoDB.
@@ -15,19 +15,20 @@ Mongo anf Couch have a lot of similarities... but still have some fondamental di
 === Requirements
 
 * Ruby (tested with ruby 1.8.6 on MacOS Leopard / Snow Leopard & Ubuntu 9.04)
-* Gems : sinatra, yajl-ruby, mongodb-mongo, mongodb-mongo_ext
+* Gems : sinatra, yajl-ruby, mongo, mongo_ext
 
 To install those gems :
-    
+
     $ gem sources -a http://gems.github.com
-    $ sudo gem install sinatra yajl-ruby mongodb-mongo mongodb-mongo_ext
-    
+    $ sudo gem install bundler
+
 === Installation
-    
+
     $ git clone git://github.com/sbellity/futon4mongo.git
     $ cd futon4mongo
-    $ ./serve [mongodb_host] [mongodb_port]
-    
+    $ bundle install
+    $ rackup -p 4567
+
 Go to http://localhost:4567/_utils/index.html
 
 = Special features
@@ -37,7 +38,7 @@ Go to http://localhost:4567/_utils/index.html
 futon4mongo replicates CouchDB's views functionality with some notable differences :
 
     * views are stored in design documents in a special collection called "__design"
-    * MongoDB does not support (yet?) map/reduce operations, so the "map" part of the view is used to store filters as json documents. 
+    * MongoDB does not support (yet?) map/reduce operations, so the "map" part of the view is used to store filters as json documents.
     * The "reduce" part is used to store other parameters (TODO : complete documentation here...)
 
 
@@ -45,8 +46,8 @@ futon4mongo replicates CouchDB's views functionality with some notable differenc
 
 === Databases and Collections
 
-CouchDB does not have "collections", all the documents are stored directly into "databases". 
-futon4mongo sees mongo's collections as databases with the following conventions : 
+CouchDB does not have "collections", all the documents are stored directly into "databases".
+futon4mongo sees mongo's collections as databases with the following conventions :
 
     * futon'db = "db_name/collection_name"
     * futon's db list does not include mongo's system collections nor the special "__design" collections
@@ -60,3 +61,4 @@ Mongo's _id are typed... and it make it difficult use CouchDB's REST interface a
     * else _id is considered as a String
 
 This method is not 100% reliable, but I guess it should cover the most common situations
+
