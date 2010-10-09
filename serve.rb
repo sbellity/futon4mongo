@@ -49,7 +49,7 @@ get "/_uuids" do
   db_name, col_name = CGI::unescape(referrer.query).split("/", 2)
 
   if (db_name && col_name)
-    { "uuids" => [BSON::ObjectID.new.to_s] }.to_json
+    { "uuids" => [BSON::ObjectId.new.to_s] }.to_json
   else 
     error_not_found
   end
@@ -102,8 +102,8 @@ get "/:database/:collection/_all_docs" do
         
     # for docid direct access...
     if startkey && endkey && params[:limit] == "10" && endkey[-1] == 122
-      s = BSON::ObjectID.from_string(startkey.ljust(24, "0")) rescue startkey
-      e = BSON::ObjectID.from_string(endkey.gsub("z", "f").ljust(24, "f")) rescue endkey
+      s = BSON::ObjectId.from_string(startkey.ljust(24, "0")) rescue startkey
+      e = BSON::ObjectId.from_string(endkey.gsub("z", "f").ljust(24, "f")) rescue endkey
       query["_id"] = {
         "$gte" => s,
         "$lte" => e
@@ -243,7 +243,7 @@ def getkey(key)
   if key =~ /^[0-9]+$/
     return key.to_i
   else
-    return BSON::ObjectID.from_string(key) rescue key
+    return BSON::ObjectId.from_string(key) rescue key
   end
 end
 
