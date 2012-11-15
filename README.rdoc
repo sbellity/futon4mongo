@@ -54,7 +54,7 @@ futon4mongo sees mongo's collections as databases with the following conventions
 
 === Document IDs
 
-Mongo's _id are typed... and it make it difficult use CouchDB's REST interface as is with Mongo. The following conventions are used to try to guess the correct _id type from the string provided in the url.
+Mongo's _id are typed... which makes it difficult to use CouchDB's REST interface with Mongo as is. The following conventions are used to try to guess the correct _id type from the string provided in the url.
 
     * if _id is made of numbers, tries to cast _id as a FixNum and falls back to a String if no result is found
     * if _id is a valid ObjectId tries to cast _id as a Mongo::ObjectID and falls back to a String if no result is found
